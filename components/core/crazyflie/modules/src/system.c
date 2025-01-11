@@ -165,14 +165,8 @@ bool systemTest()
 
 /* Private functions implementation */
 
-void systemTask(void *arg)
+void runRemaining(void)
 {
-  bool pass = true;
-
-  ledInit();
-  ledSet(CHG_LED, 1);
-  wifiInit();
-  vTaskDelay(M2T(500));
 
 #ifdef DEBUG_QUEUE_MONITOR
   queueMonitorInit();
@@ -206,6 +200,7 @@ void systemTask(void *arg)
   proximityInit();
 #endif
 
+  bool pass = true;
 	/* Test each modules */
   pass &= wifiTest();
   DEBUG_PRINTI("wifilinkTest = %d ", pass);
@@ -266,6 +261,17 @@ void systemTask(void *arg)
     }
   }
   DEBUG_PRINT("Free heap: %"PRIu32" bytes\n", xPortGetFreeHeapSize());
+}
+
+void systemTask(void *arg)
+{
+
+  ledInit();
+  ledSet(CHG_LED, 1);
+  wifiInit();
+  vTaskDelay(M2T(500));
+
+  runRemaining();
 
   workerLoop();
 

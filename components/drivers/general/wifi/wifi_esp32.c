@@ -3,11 +3,15 @@
 #include "config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "esp_log.h"
+#include "nvs_flash.h"
+
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
@@ -31,8 +35,8 @@
 
 static struct sockaddr_storage source_addr;
 
-static char WIFI_SSID[32] = "";
-static char WIFI_PWD[64] = CONFIG_WIFI_PASSWORD;
+// static char WIFI_SSID[32] = "";
+// static char WIFI_PWD[64] = CONFIG_WIFI_PASSWORD;
 static uint8_t WIFI_CH = CONFIG_WIFI_CHANNEL;
 #define WIFI_MAX_STA_CONN CONFIG_WIFI_MAX_STA_CONN
 
@@ -40,6 +44,8 @@ static uint8_t WIFI_CH = CONFIG_WIFI_CHANNEL;
 #define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
 #define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
 #endif
+
+static const char *TAG = "wifi station";
 
 static int sock;
 static xQueueHandle udpDataRx;
@@ -64,18 +70,18 @@ static uint8_t calculate_cksum(void *data, size_t len)
     return cksum;
 }
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
-{
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_data;
-        DEBUG_PRINT_LOCAL("station" MACSTR "join, AID=%d", MAC2STR(event->mac), event->aid);
+// static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+//                                int32_t event_id, void *event_data)
+// {
+//     if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+//         wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_data;
+//         DEBUG_PRINT_LOCAL("station" MACSTR "join, AID=%d", MAC2STR(event->mac), event->aid);
 
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *) event_data;
-        DEBUG_PRINT_LOCAL("station" MACSTR "leave, AID=%d", MAC2STR(event->mac), event->aid);
-    }
-}
+//     } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+//         wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *) event_data;
+//         DEBUG_PRINT_LOCAL("station" MACSTR "leave, AID=%d", MAC2STR(event->mac), event->aid);
+//     }
+// }
 
 bool wifiTest(void)
 {
@@ -129,6 +135,41 @@ static esp_err_t udp_server_create(void *arg)
     return ESP_OK;
 }
 
+char* log_byte_array(const unsigned char *array, size_t size) {
+    if (size == 0) {
+        char *empty = malloc(1);
+        if (empty) {
+            *empty = '\0'; // Пустая строка
+        }
+        return empty;
+    }
+
+    // Максимальная длина одного числа: 3 символа (например, "255"), плюс запятая и пробел
+    size_t max_byte_length = 4; // "255," = 4 символа
+    size_t buffer_size = size * max_byte_length; // Оценка размера буфера
+    char *result = malloc(buffer_size);
+
+    if (!result) {
+        return NULL; // Ошибка выделения памяти
+    }
+
+    char *current = result;
+    for (size_t i = 0; i < size; ++i) {
+        // Печатаем текущее число в строку
+        int written = sprintf(current, "%d", array[i]);
+        current += written;
+
+        if (i < size - 1) {
+            // Добавляем запятую и пробел, если это не последний элемент
+            *current++ = ',';
+            *current++ = ' ';
+        }
+    }
+    *current = '\0'; // Завершаем строку
+
+    return result;
+}
+
 static void udp_server_rx_task(void *pvParameters)
 {
     socklen_t socklen = sizeof(source_addr);
@@ -141,6 +182,9 @@ static void udp_server_rx_task(void *pvParameters)
             continue;
         }
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
+
+        // ESP_LOGI(TAG, "rx_buffer: %s\n", log_byte_array(&rx_buffer, sizeof(rx_buffer)));
+
         /* command step - receive  01 from Wi-Fi UDP */
         if (len < 0) {
             DEBUG_PRINT_LOCAL("recvfrom failed: errno %d", errno);
@@ -185,6 +229,8 @@ static void udp_server_tx_task(void *pvParameters)
             // append cksum to the packet
             outPacket.data[outPacket.size] = calculate_cksum(outPacket.data, outPacket.size);
             outPacket.size += 1;
+
+            // ESP_LOGI(TAG, "tx_buffer: %s\n", log_byte_array(&outPacket.data, outPacket.size));
 
             int err = sendto(sock, outPacket.data, outPacket.size, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
             if (err < 0) {
@@ -249,6 +295,14 @@ static void app_espnow_event_handler(void *handler_args, esp_event_base_t base, 
     }
 }
 
+esp_netif_t* wifi_init_sta(void);
+static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+
+
+static esp_ip4_addr_t this_ip;
+static esp_ip4_addr_t this_netmask;
+static esp_ip4_addr_t this_gw;
+
 void wifiInit(void)
 {
     if (isInit) {
@@ -261,58 +315,60 @@ void wifiInit(void)
     DEBUG_QUEUE_MONITOR_REGISTER(udpDataTx);
 
     espnow_storage_init();
-    esp_netif_t *ap_netif = NULL;
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    ap_netif = esp_netif_create_default_wifi_ap();
+    /*esp_netif_t *sta_netif = */wifi_init_sta();
+
+    // ESP_ERROR_CHECK(esp_netif_init());
+    // ESP_ERROR_CHECK(esp_event_loop_create_default());
+    // ap_netif = esp_netif_create_default_wifi_ap();
     uint8_t mac[6];
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    // wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    // ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                    ESP_EVENT_ANY_ID,
-                    &wifi_event_handler,
-                    NULL,
-                    NULL));
+    // ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+    //                 ESP_EVENT_ANY_ID,
+    //                 &wifi_event_handler,
+    //                 NULL,
+    //                 NULL));
 
-    ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_AP, mac));
-    sprintf(WIFI_SSID, "%s_%02X%02X%02X%02X%02X%02X", CONFIG_WIFI_BASE_SSID, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_STA, mac));
+    // sprintf(WIFI_SSID, "%s_%02X%02X%02X%02X%02X%02X", CONFIG_WIFI_BASE_SSID, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    ESP_LOGI(TAG, "mac:" MACSTR, MAC2STR(mac));
 
-    wifi_config_t wifi_config = {
-        .ap = {
-            .channel = WIFI_CH,
-            .max_connection = WIFI_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK,
-        },
-    };
+    // wifi_config_t wifi_config = {
+    //     .ap = {
+    //         .channel = WIFI_CH,
+    //         .max_connection = WIFI_MAX_STA_CONN,
+    //         .authmode = WIFI_AUTH_WPA_WPA2_PSK,
+    //     },
+    // };
 
-    memcpy(wifi_config.ap.ssid, WIFI_SSID, strlen(WIFI_SSID) + 1) ;
-    wifi_config.ap.ssid_len = strlen(WIFI_SSID);
-    memcpy(wifi_config.ap.password, WIFI_PWD, strlen(WIFI_PWD) + 1) ;
+    // memcpy(wifi_config.ap.ssid, WIFI_SSID, strlen(WIFI_SSID) + 1) ;
+    // wifi_config.ap.ssid_len = strlen(WIFI_SSID);
+    // memcpy(wifi_config.ap.password, WIFI_PWD, strlen(WIFI_PWD) + 1) ;
 
-    if (strlen(WIFI_PWD) == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
+    // if (strlen(WIFI_PWD) == 0) {
+    //     wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    // }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_set_channel(WIFI_CH, WIFI_SECOND_CHAN_NONE);
+    // ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    // ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
+    // ESP_ERROR_CHECK(esp_wifi_start());
+    // esp_wifi_set_channel(WIFI_CH, WIFI_SECOND_CHAN_NONE);
     espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
     espnow_init(&espnow_config);
     esp_event_handler_register(ESP_EVENT_ESPNOW, ESP_EVENT_ANY_ID, app_espnow_event_handler, NULL);
     ESP_ERROR_CHECK(espnow_ctrl_responder_bind(30 * 1000, -55, NULL));
     espnow_ctrl_responder_data(espnow_ctrl_data_cb);
-    esp_netif_ip_info_t ip_info = {
-        .ip.addr = ipaddr_addr("192.168.43.42"),
-        .netmask.addr = ipaddr_addr("255.255.255.0"),
-        .gw.addr      = ipaddr_addr("192.168.43.42"),
-    };
-    ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
-    ESP_ERROR_CHECK(esp_netif_set_ip_info(ap_netif, &ip_info));
-    ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
-    DEBUG_PRINT_LOCAL("wifi_init_softap complete.SSID:%s password:%s", WIFI_SSID, WIFI_PWD);
+    // esp_netif_ip_info_t ip_info = {
+    //     .ip.addr = this_ip.addr,
+    //     .netmask.addr = this_mask.addr,
+    //     .gw.addr      = this_gw.addr,
+    // };
+    // ESP_ERROR_CHECK(esp_netif_dhcps_stop(sta_netif));
+    // ESP_ERROR_CHECK(esp_netif_set_ip_info(sta_netif, &ip_info));
+    // ESP_ERROR_CHECK(esp_netif_dhcps_start(sta_netif));
+    // DEBUG_PRINT_LOCAL("wifi_init_softap complete.SSID:%s password:%s", WIFI_SSID, WIFI_PWD);
 
     if (udp_server_create(NULL) == ESP_FAIL) {
         DEBUG_PRINT_LOCAL("UDP server create socket failed");
@@ -321,5 +377,123 @@ void wifiInit(void)
     }
     xTaskCreate(udp_server_tx_task, UDP_TX_TASK_NAME, UDP_TX_TASK_STACKSIZE, NULL, UDP_TX_TASK_PRI, NULL);
     xTaskCreate(udp_server_rx_task, UDP_RX_TASK_NAME, UDP_RX_TASK_STACKSIZE, NULL, UDP_RX_TASK_PRI, NULL);
+
     isInit = true;
+}
+
+
+#define EXAMPLE_ESP_WIFI_SSID      "mi_383B"
+#define EXAMPLE_ESP_WIFI_PASS      "9277053439"
+#define EXAMPLE_ESP_MAXIMUM_RETRY  5
+#define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_OPEN
+
+static EventGroupHandle_t s_wifi_event_group;
+
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+
+
+
+static int s_retry_num = 0;
+
+
+
+static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
+            esp_wifi_connect();
+            s_retry_num++;
+            ESP_LOGI(TAG, "retry to connect to the AP");
+        } else {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+        ESP_LOGI(TAG,"connect to the AP fail");
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+
+        this_ip = event->ip_info.ip;
+        this_netmask = event->ip_info.netmask;
+        this_gw = event->ip_info.gw;
+
+        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&this_ip));
+        ESP_LOGI(TAG, "got netmask:" IPSTR, IP2STR(&this_netmask));
+        ESP_LOGI(TAG, "got gw:" IPSTR, IP2STR(&this_gw));
+
+        s_retry_num = 0;
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+}
+
+esp_netif_t* wifi_init_sta(void)
+{
+    s_wifi_event_group = xEventGroupCreate();
+
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                        IP_EVENT_STA_GOT_IP,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_got_ip));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .channel = WIFI_CH,
+            .ssid = EXAMPLE_ESP_WIFI_SSID,
+            .password = EXAMPLE_ESP_WIFI_PASS,
+            /* Setting a password implies station will connect to all security modes including WEP/WPA.
+             * However these modes are deprecated and not advisable to be used. Incase your Access point
+             * doesn't support WPA2, these mode can be enabled by commenting below line */
+	     .threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD,
+	     .sae_pwe_h2e = WPA3_SAE_PWE_BOTH,
+        },
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+    ESP_ERROR_CHECK(esp_wifi_start() );
+
+    ESP_LOGI(TAG, "wifi_init_sta finished.");
+
+    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
+     * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+            pdFALSE,
+            pdFALSE,
+            portMAX_DELAY);
+
+    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
+     * happened. */
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
+                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+    } else if (bits & WIFI_FAIL_BIT) {
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
+                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+    } else {
+        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+    }
+
+    /* The event will not be processed after unregister */
+    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
+    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
+    vEventGroupDelete(s_wifi_event_group);
+
+    return sta_netif;
 }
