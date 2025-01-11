@@ -163,6 +163,11 @@ void crtpCommanderRpytDecodeSetpoint(setpoint_t *setpoint, CRTPPacket *pk)
 {
   struct CommanderCrtpLegacyValues *values = (struct CommanderCrtpLegacyValues*)pk->data;
 
+  printf("thrust = %d\n", values->thrust);
+  printf("pitch = %d\n", values->pitch);
+  printf("roll = %d\n", values->roll);
+  printf("roll = %d\n", values->yaw);
+
   if (commanderGetActivePriority() == COMMANDER_PRIORITY_DISABLE) {
     thrustLocked = true;
   }

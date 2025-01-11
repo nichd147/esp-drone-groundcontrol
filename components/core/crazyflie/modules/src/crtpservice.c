@@ -64,15 +64,18 @@ void crtpserviceHandler(CRTPPacket *p)
   switch (p->channel)
   {
     case linkEcho:
+      printf("linkEcho\n");
       crtpSendPacket(p);
       break;
     case linkSource:
       p->size = CRTP_MAX_DATA_SIZE;
       bzero(p->data, CRTP_MAX_DATA_SIZE);
       strcpy((char*)p->data, "Bitcraze Crazyflie");
+      printf("linkSource\n");
       crtpSendPacket(p);
       break;
     case linkSink:
+      printf("linkSink\n");
       /* Ignore packet */
       break;
     default:

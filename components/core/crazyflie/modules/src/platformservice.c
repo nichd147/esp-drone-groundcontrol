@@ -85,13 +85,16 @@ void platformserviceHandler(CRTPPacket *p)
   switch (p->channel)
   {
     case platformCommand:
+      printf("platformCommand\n");
       platformCommandProcess(p->data[0], &p->data[1]);
       crtpSendPacket(p);
       break;
     case versionCommand:
+      printf("versionCommand\n");
       versionCommandProcess(p);
       break;
     case appChannel:
+      printf("appChannel\n");
       appchannelIncomingPacket(p);
       break;
     default:
