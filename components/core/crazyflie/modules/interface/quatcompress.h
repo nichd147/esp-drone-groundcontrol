@@ -62,7 +62,7 @@ static inline uint32_t quatcompress(float const q[4])
 	return comp;
 }
 
-static inline void quatdecompress(uint32_t comp, float q[4])
+static inline void quatdecompress(uint32_t comp, float *q)
 {
 	unsigned const mask = (1 << 9) - 1;
 
