@@ -36,11 +36,6 @@
 
 static struct sockaddr_storage source_addr;
 
-static char WIFI_SSID[32] = "";
-static char WIFI_PWD[64] = CONFIG_WIFI_PASSWORD;
-static uint8_t WIFI_CH = CONFIG_WIFI_CHANNEL;
-#define WIFI_MAX_STA_CONN CONFIG_WIFI_MAX_STA_CONN
-
 #ifndef MAC2STR
 #define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
 #define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
@@ -307,7 +302,6 @@ void app_wifi_set_softap_info(void)
     esp_mesh_lite_set_softap_info(softap_ssid, CONFIG_BRIDGE_SOFTAP_PASSWORD);
 }
 
-
 static const char *TAG_APP = "app";
 
 static void print_system_info_timercb(TimerHandle_t timer)
@@ -338,7 +332,7 @@ static void print_system_info_timercb(TimerHandle_t timer)
 #define CONFIG_SERVER_IP "192.168.0.1"
 #define CONFIG_SERVER_PORT 8070
 
-static int g_sockfd    = -1;
+static int g_sockfd = -1;
 static const char *TAG_TCP_CLIENT = "tcp client";
 
 static int socket_tcp_client_create(const char *ip, uint16_t port)
@@ -346,7 +340,7 @@ static int socket_tcp_client_create(const char *ip, uint16_t port)
     ESP_LOGD(TAG_TCP_CLIENT, "Create a tcp client, ip: %s, port: %d", ip, port);
 
     esp_err_t ret = ESP_OK;
-    int sockfd    = -1;
+    int sockfd = -1;
     struct ifreq iface;
     memset(&iface, 0x0, sizeof(iface));
     struct sockaddr_in server_addr = {
@@ -356,18 +350,21 @@ static int socket_tcp_client_create(const char *ip, uint16_t port)
     };
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
+    if (sockfd < 0)
+    {
         ESP_LOGE(TAG_TCP_CLIENT, "socket create, sockfd: %d", sockfd);
         goto ERR_EXIT;
     }
 
     esp_netif_get_netif_impl_name(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), iface.ifr_name);
-    if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE,  &iface, sizeof(struct ifreq)) != 0) {
+    if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, &iface, sizeof(struct ifreq)) != 0)
+    {
         ESP_LOGE(TAG_TCP_CLIENT, "Bind [sock=%d] to interface %s fail", sockfd, iface.ifr_name);
     }
 
     ret = connect(sockfd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
-    if (ret < 0) {
+    if (ret < 0)
+    {
         ESP_LOGD(TAG_TCP_CLIENT, "socket connect, ret: %d, ip: %s, port: %d",
                  ret, ip, port);
         goto ERR_EXIT;
@@ -376,7 +373,8 @@ static int socket_tcp_client_create(const char *ip, uint16_t port)
 
 ERR_EXIT:
 
-    if (sockfd != -1) {
+    if (sockfd != -1)
+    {
         close(sockfd);
     }
 
@@ -385,18 +383,20 @@ ERR_EXIT:
 
 void tcp_client_write_task(void *arg)
 {
-    size_t size        = 0;
-    int count          = 0;
-    char *data         = NULL;
-    esp_err_t ret      = ESP_OK;
+    size_t size = 0;
+    int count = 0;
+    char *data = NULL;
+    esp_err_t ret = ESP_OK;
     uint8_t sta_mac[6] = {0};
 
     esp_wifi_get_mac(ESP_IF_WIFI_STA, sta_mac);
 
     ESP_LOGI(TAG_TCP_CLIENT, "TCP client write task is running");
 
-    while (1) {
-        if (g_sockfd == -1) {
+    while (1)
+    {
+        if (g_sockfd == -1)
+        {
             vTaskDelay(500 / portTICK_PERIOD_MS);
             g_sockfd = socket_tcp_client_create(CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
             continue;
@@ -411,7 +411,8 @@ void tcp_client_write_task(void *arg)
         ret = write(g_sockfd, data, size);
         free(data);
 
-        if (ret <= 0) {
+        if (ret <= 0)
+        {
             ESP_LOGE(TAG_TCP_CLIENT, "<%s> TCP write", strerror(errno));
             close(g_sockfd);
             g_sockfd = -1;
@@ -423,7 +424,8 @@ void tcp_client_write_task(void *arg)
 
     close(g_sockfd);
     g_sockfd = -1;
-    if (data) {
+    if (data)
+    {
         free(data);
     }
     vTaskDelete(NULL);
@@ -434,7 +436,8 @@ static void ip_event_sta_got_ip_handler(void *arg, esp_event_base_t event_base,
 {
     static bool tcp_task = false;
 
-    if (!tcp_task) {
+    if (!tcp_task)
+    {
         xTaskCreate(tcp_client_write_task, "tcp_client_write_task", 4 * 1024, NULL, 5, NULL);
         tcp_task = true;
     }
@@ -484,61 +487,27 @@ void wifiInit(void)
         esp_mesh_lite_start();
     }
 
-    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
-    uint8_t mac[6];
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_sta_got_ip_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
 
-    ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_AP, mac));
-    sprintf(WIFI_SSID, "%s_%02X%02X%02X%02X%02X%02X", CONFIG_WIFI_BASE_SSID, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    // uint8_t mac[6];
+    // ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_AP, mac));
 
-    wifi_config_t wifi_config = {
-        .ap = {
-            .channel = WIFI_CH,
-            .max_connection = WIFI_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK,
-        },
-    };
-
-    memcpy(wifi_config.ap.ssid, WIFI_SSID, strlen(WIFI_SSID) + 1);
-    wifi_config.ap.ssid_len = strlen(WIFI_SSID);
-    memcpy(wifi_config.ap.password, WIFI_PWD, strlen(WIFI_PWD) + 1);
-
-    if (strlen(WIFI_PWD) == 0)
-    {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_set_channel(WIFI_CH, WIFI_SECOND_CHAN_NONE);
     espnow_config_t espnow_config = ESPNOW_INIT_CONFIG_DEFAULT();
     espnow_init(&espnow_config);
     esp_event_handler_register(ESP_EVENT_ESPNOW, ESP_EVENT_ANY_ID, app_espnow_event_handler, NULL);
     ESP_ERROR_CHECK(espnow_ctrl_responder_bind(30 * 1000, -55, NULL));
     espnow_ctrl_responder_data(espnow_ctrl_data_cb);
-    esp_netif_ip_info_t ip_info = {
-        .ip.addr = ipaddr_addr("192.168.43.42"),
-        .netmask.addr = ipaddr_addr("255.255.255.0"),
-        .gw.addr = ipaddr_addr("192.168.43.42"),
-    };
-    ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
-    ESP_ERROR_CHECK(esp_netif_set_ip_info(ap_netif, &ip_info));
-    ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
-    DEBUG_PRINT_LOCAL("wifi_init_softap complete.SSID:%s password:%s", WIFI_SSID, WIFI_PWD);
+
+    ESP_LOGI(TAG_APP, "wifi_init_softap complete.SSID:%s password:%s", CONFIG_BRIDGE_SOFTAP_SSID, CONFIG_BRIDGE_SOFTAP_PASSWORD);
 
     if (udp_server_create(NULL) == ESP_FAIL)
     {
-        DEBUG_PRINT_LOCAL("UDP server create socket failed");
+        ESP_LOGI(TAG_APP, "UDP server create socket failed");
     }
     else
     {
-        DEBUG_PRINT_LOCAL("UDP server create socket succeed");
+        ESP_LOGI(TAG_APP, "UDP server create socket succeed");
     }
     xTaskCreate(udp_server_tx_task, UDP_TX_TASK_NAME, UDP_TX_TASK_STACKSIZE, NULL, UDP_TX_TASK_PRI, NULL);
     xTaskCreate(udp_server_rx_task, UDP_RX_TASK_NAME, UDP_RX_TASK_STACKSIZE, NULL, UDP_RX_TASK_PRI, NULL);
