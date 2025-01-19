@@ -309,6 +309,16 @@ static void udp_client_task(void *pvParameters)
     int addr_family = 0;
     int ip_protocol = 0;
 
+    struct in_addr ip_struct;
+    esp_netif_ip_info_t sta_ip;
+    memset(&sta_ip, 0x0, sizeof(esp_netif_ip_info_t));
+    esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"), &sta_ip);
+    ip_struct.s_addr = sta_ip.ip.addr;
+    char *ipStr = inet_ntoa(ip_struct);
+    ESP_LOGI(TAG_APP, "my IP: %s", ipStr);
+    char *ping_sencence = malloc(sizeof(*ipStr) + sizeof(*ping_word));
+    sprintf(ping_sencence, "%s:%s", ipStr, ping_word);
+
     while (1) {
         dest_addr.sin_addr.s_addr = inet_addr(CONFIG_SERVER_IP);
         dest_addr.sin_family = AF_INET;
@@ -331,13 +341,32 @@ static void udp_client_task(void *pvParameters)
         ESP_LOGI(TAG_APP, "Socket created, starting pinging server %s:%d", CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
 
         while (1) {
-
-            int err = sendto(sock, ping_word, strlen(ping_word), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            int err = sendto(sock, ping_sencence, strlen(ping_sencence), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             if (err < 0) {
                 ESP_LOGE(TAG_APP, "Error occurred during sending: errno %d", errno);
                 break;
             }
             ESP_LOGI(TAG_APP, "ping sent");
+
+            struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
+            socklen_t socklen = sizeof(source_addr);
+            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+
+            // Error occurred during receiving
+            if (len < 0) {
+                ESP_LOGE(TAG_APP, "recvfrom failed: errno %d", errno);
+                break;
+            }
+            // Data received
+            else {
+                rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
+                ESP_LOGI(TAG_APP, "Received %d bytes from %s:", len, host_ip);
+                ESP_LOGI(TAG_APP, "%s", rx_buffer);
+                if (strncmp(rx_buffer, "pong", 4) != 0) {
+                    ESP_LOGI(TAG_APP, "Received unexpected message, reconnecting");
+                    break;
+                }
+            }
 
             vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
