@@ -329,101 +329,75 @@ static void print_system_info_timercb(TimerHandle_t timer)
     }
 }
 
-static int g_sockfd = -1;
-static const char *TAG_TCP_CLIENT = "tcp client";
+static const char *payload = "Message from ESP32 ";
 
-static int socket_tcp_client_create(const char *ip, uint16_t port)
+static void udp_client_task(void *pvParameters)
 {
-    ESP_LOGD(TAG_TCP_CLIENT, "Create a tcp client, ip: %s, port: %d", ip, port);
+    char rx_buffer[128];
+    char host_ip[] = CONFIG_SERVER_IP;
+    int addr_family = 0;
+    int ip_protocol = 0;
 
-    esp_err_t ret = ESP_OK;
-    int sockfd = -1;
-    struct ifreq iface;
-    memset(&iface, 0x0, sizeof(iface));
-    struct sockaddr_in server_addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(port),
-        .sin_addr.s_addr = inet_addr(ip),
-    };
+    while (1) {
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
-    {
-        ESP_LOGE(TAG_TCP_CLIENT, "socket create, sockfd: %d", sockfd);
-        goto ERR_EXIT;
-    }
+        struct sockaddr_in dest_addr;
+        dest_addr.sin_addr.s_addr = inet_addr(CONFIG_SERVER_IP);
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_port = htons(CONFIG_SERVER_PORT);
+        addr_family = AF_INET;
+        ip_protocol = IPPROTO_IP;
 
-    esp_netif_get_netif_impl_name(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), iface.ifr_name);
-    if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, &iface, sizeof(struct ifreq)) != 0)
-    {
-        ESP_LOGE(TAG_TCP_CLIENT, "Bind [sock=%d] to interface %s fail", sockfd, iface.ifr_name);
-    }
-
-    ret = connect(sockfd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
-    if (ret < 0)
-    {
-        ESP_LOGD(TAG_TCP_CLIENT, "socket connect, ret: %d, ip: %s, port: %d",
-                 ret, ip, port);
-        goto ERR_EXIT;
-    }
-    return sockfd;
-
-ERR_EXIT:
-
-    if (sockfd != -1)
-    {
-        close(sockfd);
-    }
-
-    return -1;
-}
-
-void tcp_client_write_task(void *arg)
-{
-    size_t size = 0;
-    int count = 0;
-    char *data = NULL;
-    esp_err_t ret = ESP_OK;
-    uint8_t sta_mac[6] = {0};
-
-    esp_wifi_get_mac(ESP_IF_WIFI_STA, sta_mac);
-
-    ESP_LOGI(TAG_TCP_CLIENT, "TCP client write task is running");
-
-    while (1)
-    {
-        if (g_sockfd == -1)
-        {
-            vTaskDelay(500 / portTICK_PERIOD_MS);
-            g_sockfd = socket_tcp_client_create(CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
-            continue;
+        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+        if (sock < 0) {
+            ESP_LOGE(TAG_APP, "Unable to create socket: errno %d", errno);
+            break;
         }
 
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
+        // Set timeout
+        struct timeval timeout;
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
+        setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
-        size = asprintf(&data, "{\"src_addr\": \"" MACSTR "\",\"data\": \"Hello TCP Server!\",\"level\": %d,\"count\": %d}\r\n",
-                        MAC2STR(sta_mac), esp_mesh_lite_get_level(), count++);
+        ESP_LOGI(TAG_APP, "Socket created, sending to %s:%d", CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
 
-        ESP_LOGD(TAG_TCP_CLIENT, "TCP write, size: %d, data: %s", size, data);
-        ret = write(g_sockfd, data, size);
-        free(data);
+        while (1) {
 
-        if (ret <= 0)
-        {
-            ESP_LOGE(TAG_TCP_CLIENT, "<%s> TCP write", strerror(errno));
-            close(g_sockfd);
-            g_sockfd = -1;
-            continue;
+            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            if (err < 0) {
+                ESP_LOGE(TAG_APP, "Error occurred during sending: errno %d", errno);
+                break;
+            }
+            ESP_LOGI(TAG_APP, "Message sent");
+
+            // struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
+            // socklen_t socklen = sizeof(source_addr);
+            // int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+
+            // Error occurred during receiving
+            // if (len < 0) {
+                // ESP_LOGE(TAG_APP, "recvfrom failed: errno %d", errno);
+                // break;
+            // }
+            // Data received
+            // else {
+            //     rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
+            //     ESP_LOGI(TAG_APP, "Received %d bytes from %s:", len, host_ip);
+            //     ESP_LOGI(TAG_APP, "%s", rx_buffer);
+            //     if (strncmp(rx_buffer, "OK: ", 4) == 0) {
+            //         ESP_LOGI(TAG_APP, "Received expected message, reconnecting");
+            //         break;
+            //     }
+            // }
+
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
-    }
 
-    ESP_LOGI(TAG_TCP_CLIENT, "TCP client write task is exit");
-
-    close(g_sockfd);
-    g_sockfd = -1;
-    if (data)
-    {
-        free(data);
+        if (sock != -1) {
+            ESP_LOGE(TAG_APP, "Shutting down socket and restarting...");
+            shutdown(sock, 0);
+            close(sock);
+        }
     }
     vTaskDelete(NULL);
 }
@@ -435,7 +409,7 @@ static void ip_event_sta_got_ip_handler(void *arg, esp_event_base_t event_base,
 
     if (!tcp_task)
     {
-        xTaskCreate(tcp_client_write_task, "tcp_client_write_task", 4 * 1024, NULL, 5, NULL);
+        xTaskCreate(udp_client_task, "udp_client", 4096, NULL, 5, NULL);
         tcp_task = true;
     }
 }

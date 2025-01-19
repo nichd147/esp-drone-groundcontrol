@@ -5,7 +5,7 @@
 [here](https://github.com/espressif/esp-mesh-lite)
 
 # how to listen
-1. in `sdkconfig` file configure `CONFIG_SERVER_IP="192.168.0.1"`
+1. in `sdkconfig` file configure `CONFIG_SERVER_IP="192.168.5.2"`
 There should be IP of your PC where server will be started at port 8070.
 2. compile
 3. flash
@@ -14,6 +14,10 @@ There should be IP of your PC where server will be started at port 8070.
 5. enjoy
 
 
+
+for listerning udp
+
+nc -u -l 192.168.5.2 8070
 
 
 
