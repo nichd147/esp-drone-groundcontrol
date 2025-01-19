@@ -105,37 +105,6 @@ bool wifiSendData(uint32_t size, uint8_t *data)
     return (xQueueSend(udpDataTx, &outStage, M2T(100)) == pdTRUE);
 };
 
-static esp_err_t udp_server_create(void *arg)
-{
-    if (isUDPInit)
-    {
-        return ESP_OK;
-    }
-
-    static struct sockaddr_in dest_addr = {0};
-    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(UDP_SERVER_PORT);
-
-    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0)
-    {
-        DEBUG_PRINT_LOCAL("Unable to create socket: errno %d", errno);
-        return ESP_FAIL;
-    }
-    DEBUG_PRINT_LOCAL("Socket created");
-
-    int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-    if (err < 0)
-    {
-        DEBUG_PRINT_LOCAL("Socket unable to bind: errno %d", errno);
-    }
-    DEBUG_PRINT_LOCAL("Socket bound, port %d", UDP_SERVER_PORT);
-
-    isUDPInit = true;
-    return ESP_OK;
-}
-
 static void udp_server_rx_task(void *pvParameters)
 {
     socklen_t socklen = sizeof(source_addr);
@@ -192,6 +161,8 @@ static void udp_server_rx_task(void *pvParameters)
     }
 }
 
+static struct sockaddr_in dest_addr = {0};
+
 static void udp_server_tx_task(void *pvParameters)
 {
     UDPPacket outPacket = {0};
@@ -208,7 +179,7 @@ static void udp_server_tx_task(void *pvParameters)
             outPacket.data[outPacket.size] = calculate_cksum(outPacket.data, outPacket.size);
             outPacket.size += 1;
 
-            int err = sendto(sock, outPacket.data, outPacket.size, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+            int err = sendto(sock, outPacket.data, outPacket.size, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             if (err < 0)
             {
                 DEBUG_PRINT_LOCAL("Error occurred during sending: errno %d", errno);
@@ -329,7 +300,7 @@ static void print_system_info_timercb(TimerHandle_t timer)
     }
 }
 
-static const char *payload = "Message from ESP32 ";
+static const char *ping_word = "ping";
 
 static void udp_client_task(void *pvParameters)
 {
@@ -339,15 +310,13 @@ static void udp_client_task(void *pvParameters)
     int ip_protocol = 0;
 
     while (1) {
-
-        struct sockaddr_in dest_addr;
         dest_addr.sin_addr.s_addr = inet_addr(CONFIG_SERVER_IP);
         dest_addr.sin_family = AF_INET;
         dest_addr.sin_port = htons(CONFIG_SERVER_PORT);
         addr_family = AF_INET;
         ip_protocol = IPPROTO_IP;
 
-        int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
+        sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
         if (sock < 0) {
             ESP_LOGE(TAG_APP, "Unable to create socket: errno %d", errno);
             break;
@@ -359,36 +328,16 @@ static void udp_client_task(void *pvParameters)
         timeout.tv_usec = 0;
         setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
-        ESP_LOGI(TAG_APP, "Socket created, sending to %s:%d", CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
+        ESP_LOGI(TAG_APP, "Socket created, starting pinging server %s:%d", CONFIG_SERVER_IP, CONFIG_SERVER_PORT);
 
         while (1) {
 
-            int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            int err = sendto(sock, ping_word, strlen(ping_word), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             if (err < 0) {
                 ESP_LOGE(TAG_APP, "Error occurred during sending: errno %d", errno);
                 break;
             }
-            ESP_LOGI(TAG_APP, "Message sent");
-
-            // struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
-            // socklen_t socklen = sizeof(source_addr);
-            // int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-
-            // Error occurred during receiving
-            // if (len < 0) {
-                // ESP_LOGE(TAG_APP, "recvfrom failed: errno %d", errno);
-                // break;
-            // }
-            // Data received
-            // else {
-            //     rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
-            //     ESP_LOGI(TAG_APP, "Received %d bytes from %s:", len, host_ip);
-            //     ESP_LOGI(TAG_APP, "%s", rx_buffer);
-            //     if (strncmp(rx_buffer, "OK: ", 4) == 0) {
-            //         ESP_LOGI(TAG_APP, "Received expected message, reconnecting");
-            //         break;
-            //     }
-            // }
+            ESP_LOGI(TAG_APP, "ping sent");
 
             vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
@@ -472,14 +421,6 @@ void wifiInit(void)
 
     ESP_LOGI(TAG_APP, "wifi_init_softap complete.SSID:%s password:%s", CONFIG_BRIDGE_SOFTAP_SSID, CONFIG_BRIDGE_SOFTAP_PASSWORD);
 
-    if (udp_server_create(NULL) == ESP_FAIL)
-    {
-        ESP_LOGI(TAG_APP, "UDP server create socket failed");
-    }
-    else
-    {
-        ESP_LOGI(TAG_APP, "UDP server create socket succeed");
-    }
     xTaskCreate(udp_server_tx_task, UDP_TX_TASK_NAME, UDP_TX_TASK_STACKSIZE, NULL, UDP_TX_TASK_PRI, NULL);
     xTaskCreate(udp_server_rx_task, UDP_RX_TASK_NAME, UDP_RX_TASK_STACKSIZE, NULL, UDP_RX_TASK_PRI, NULL);
 
