@@ -329,9 +329,6 @@ static void print_system_info_timercb(TimerHandle_t timer)
     }
 }
 
-#define CONFIG_SERVER_IP "192.168.0.1"
-#define CONFIG_SERVER_PORT 8070
-
 static int g_sockfd = -1;
 static const char *TAG_TCP_CLIENT = "tcp client";
 
@@ -443,8 +440,8 @@ static void ip_event_sta_got_ip_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-#define CONFIG_ROUTER_SSID "mi_383B"
-#define CONFIG_ROUTER_PASSWORD "1234567890"
+#define CONFIG_ROUTER_SSID CONFIG_BRIDGE_SOFTAP_SSID
+#define CONFIG_ROUTER_PASSWORD CONFIG_BRIDGE_SOFTAP_PASSWORD
 
 void wifiInit(void)
 {
