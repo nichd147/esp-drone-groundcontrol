@@ -4,7 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import se.bitcraze.crazyflie.lib.crazyflie.ConnectionAdapter;
 import se.bitcraze.crazyflie.lib.crazyflie.Crazyflie;
 import se.bitcraze.crazyflie.lib.crazyradio.ConnectionData;
-import se.bitcraze.crazyflie.lib.crazyradio.RadioDriver;
 import se.bitcraze.crazyflie.lib.crtp.CommanderPacket;
 import se.bitcraze.crazyflie.lib.crtp.CrtpDriver;
 import se.bitcraze.crazyflie.lib.crtp.CrtpPacket;
@@ -49,6 +48,11 @@ public class MainPresenter {
 
     private Thread mSendJoystickDataThread;
     private ConsoleListener mConsoleListener;
+
+    private Controls mControls;
+    private IController mController;
+    private JoystickView mJoystickViewLeft =  new JoystickView();
+    private JoystickView mJoystickViewRight =  new JoystickView();
 
     public MainPresenter() {
     }
@@ -201,6 +205,7 @@ public class MainPresenter {
                         sendPacket(new CommanderPacket(roll, pitch, yaw, (char) thrustAbsolute, xmode));
                     }
                     try {
+//                        Thread.sleep(1000);
                         Thread.sleep(20);
                     } catch (InterruptedException e) {
                         log.debug("SendJoystickDataThread was interrupted.");
@@ -212,14 +217,22 @@ public class MainPresenter {
         mSendJoystickDataThread.start();
     }
 
-    private Controls getControls() {
-        return null; // TODO
+    public Controls getControls() {
+        if (mControls == null) {
+            mControls = new Controls();
+            mControls.setDefaultPreferenceValues();
+            mControls.setControlConfig();
+        }
+        return mControls;
     }
 
-    private IController getController() {
-        Controls mControls = new Controls();
-        mControls.setDefaultPreferenceValues();
-        return new TouchController(mControls, new JoystickView(), new JoystickView());
+    public IController getController() {
+        if (mController == null) {
+            mController = new TouchController(getControls(), mJoystickViewLeft, mJoystickViewRight);
+            mController.enable();
+        }
+
+        return mController;
     }
 
     public void connect(File cacheDir) {

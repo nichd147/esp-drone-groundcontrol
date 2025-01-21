@@ -8,4 +8,6 @@ public interface IJoystickView {
     void autoReturn(boolean b);
 
     void setOnJoystickMovedListener(JoystickMovedListener listenerLeft);
+
+    boolean processMoveEvent(float x, float y );
 }

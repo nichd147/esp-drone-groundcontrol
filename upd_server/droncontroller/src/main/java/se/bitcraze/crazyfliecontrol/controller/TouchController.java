@@ -79,6 +79,16 @@ public class TouchController extends AbstractController {
         return "touch controller";
     }
 
+    @Override
+    public IJoystickView getLeftJoy() {
+        return mJoystickViewLeft;
+    }
+
+    @Override
+    public IJoystickView getRightJoy() {
+        return mJoystickViewRight;
+    }
+
     private JoystickMovedListener _listenerRight = new JoystickMovedListener() {
 
         @Override

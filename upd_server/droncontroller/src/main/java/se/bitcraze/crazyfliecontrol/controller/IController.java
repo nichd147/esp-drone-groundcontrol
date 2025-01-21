@@ -49,4 +49,6 @@ public interface IController {
 
     public String getControllerName();
 
+    IJoystickView getLeftJoy();
+    IJoystickView getRightJoy();
 }

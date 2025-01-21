@@ -140,8 +140,9 @@
             console.log('Успех:', data);
         })
         .catch((error) => {
-            let problem = confirm("check connection");
-            alert( problem );
+            console.log('error:', error);
+<!--            let problem = confirm("check connection");-->
+<!--            alert( problem );-->
         });
     }, 200);
 

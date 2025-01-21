@@ -86,6 +86,7 @@ public class JoystickView implements IJoystickView {
     private void initJoystickView() {
         innerPadding = 10;
 
+        movementRadius = 100;
         setMovementRange(10);
         setMoveResolution(1.0f);
         setUserCoordinateSystem(COORDINATE_CARTESIAN);
@@ -240,6 +241,17 @@ public class JoystickView implements IJoystickView {
                 moveListener.OnReleased();
             }
         }
+    }
+
+
+    public boolean processMoveEvent(float x, float y ) {
+        // Translate touch position to center of view
+        touchX = x;
+        touchY = y;
+
+        // Log.d(TAG, String.format("ACTION_MOVE: (%03.0f, %03.0f) => (%03.0f, %03.0f)", x, y, touchX, touchY));
+        reportOnMoved();
+        return true;
     }
 
     private void withDelay(Runnable runnable, int i) {

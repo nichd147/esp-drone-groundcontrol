@@ -23,9 +23,10 @@ public class GamePadController {
     @PostMapping
     @RequestMapping(path = "/api/position")
     public void position(@RequestBody SticksPosition position) {
-        log.info("got position: {}", position);
+//        log.info("got position: {}", position);
 
-
+        mainPresenter.getController().getLeftJoy().processMoveEvent(position.getLeftJoyX(), position.getLeftJoyY());
+        mainPresenter.getController().getRightJoy().processMoveEvent(position.getRightJoyX(), position.getRightJoyY());
 
     }
 }
