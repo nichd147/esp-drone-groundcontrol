@@ -77,6 +77,29 @@ public class EspUdpDriver extends CrtpDriver {
 
         mConnectMark = true;
         notifyConnectionRequested();
+
+
+        if (mConnectMark) {
+            mConnectMark = false;
+            try {
+                InetAddress deviceAddress = InetAddress.getByName(DEVICE_ADDRESS);
+                mSocket = new DatagramSocket(null);
+                mSocket.setReuseAddress(true);
+                mSocket.bind(new InetSocketAddress(APP_PORT));
+                mReceiveThread = new ReceiveThread(mSocket);
+                mReceiveThread.setPacketQueue(mInQueue);
+                mReceiveThread.start();
+                mPostThread = new PostThread(mSocket, deviceAddress);
+                mPostThread.start();
+                notifyConnected();
+            } catch (IOException e) {
+                if (mSocket != null) {
+                    mSocket.close();
+                    mSocket = null;
+                }
+                notifyConnectionFailed("Create socket failed");
+            }
+        }
     }
 
     @Override
