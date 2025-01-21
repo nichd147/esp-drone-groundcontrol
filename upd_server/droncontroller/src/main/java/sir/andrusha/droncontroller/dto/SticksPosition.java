@@ -4,8 +4,12 @@ import lombok.Data;
 
 @Data
 public class SticksPosition {
-    int rightX;
-    int rightY;
-    int leftX;
-    int leftY;
+    int leftJoyX;
+    int leftJoyY;
+    int rightJoyX;
+    int rightJoyY;
+
+    public String toString() {
+        return "[" + leftJoyX + ";" + leftJoyY + "] [" + rightJoyX + ";" + rightJoyY + "]";
+    }
 }
