@@ -1,4 +1,4 @@
-package sir.andrusha.droncontroller;
+package sir.andrusha.droncontroller.service;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -9,14 +9,15 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
 @Slf4j
-public class UdpServer extends Thread {
+public class UdpPingPongThread extends Thread {
 
+    private final DroneRegistry droneRegistry;
     protected DatagramSocket socket = null;
     protected boolean running;
     protected byte[] buf = new byte[1024];
 
-    public UdpServer() throws IOException {
-        InetAddress deviceAddress = InetAddress.getByName("192.168.5.2");
+    public UdpPingPongThread(DroneRegistry droneRegistry) throws IOException {
+        this.droneRegistry = droneRegistry;
         socket = new DatagramSocket(null);
         socket.setReuseAddress(true);
         socket.bind(new InetSocketAddress(8070));
@@ -35,8 +36,9 @@ public class UdpServer extends Thread {
                 if (received.contains("ping")) {
                     InetAddress address = in.getAddress();
                     int port = in.getPort();
+                    Integer portToConnect = droneRegistry.initDrone(received.substring(0, received.lastIndexOf(":")));
                     DatagramPacket out = new DatagramPacket(buf, buf.length, address, port);
-                    out.setData("pong".getBytes());
+                    out.setData(portToConnect.toString().getBytes());
                     socket.send(out);
                 }
             } catch (IOException e) {

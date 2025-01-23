@@ -4,6 +4,7 @@ import lombok.Data;
 
 @Data
 public class SticksPosition {
+    String droneName;
     int leftJoyX;
     int leftJoyY;
     int rightJoyX;

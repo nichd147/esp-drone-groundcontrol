@@ -1,18 +1,18 @@
 package se.bitcraze.crazyfliecontrol2;
 
+import lombok.extern.slf4j.Slf4j;
+import se.bitcraze.crazyflie.lib.crtp.CrtpDriver;
+import se.bitcraze.crazyflie.lib.crtp.CrtpPacket;
+
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-
-import lombok.extern.slf4j.Slf4j;
-import se.bitcraze.crazyflie.lib.crtp.CrtpDriver;
-import se.bitcraze.crazyflie.lib.crtp.CrtpPacket;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 public class EspUdpDriver extends CrtpDriver {
@@ -24,6 +24,9 @@ public class EspUdpDriver extends CrtpDriver {
 
     private volatile boolean mConnectMark = false;
     private volatile DatagramSocket mSocket;
+    private AtomicReference<Integer> port = new AtomicReference();
+    private AtomicReference<InetAddress> address = new AtomicReference();
+
     private volatile ReceiveThread mReceiveThread;
     private volatile PostThread mPostThread;
 
@@ -63,42 +66,26 @@ public class EspUdpDriver extends CrtpDriver {
 //        }
 //    };
 
-    public EspUdpDriver(/*EspActivity activity*/) {
+    public EspUdpDriver(DatagramSocket mSocket) {
 //        mActivity = activity;
-        mInQueue = new LinkedBlockingQueue<>();
+        this.mSocket = mSocket;
+        this.mInQueue = new LinkedBlockingQueue<>();
     }
 
     @Override
     public void connect() throws IOException {
         log.info("Connect()");
-        if (mSocket != null) {
-            throw new IllegalStateException("Connection already started");
-        }
-
         mConnectMark = true;
         notifyConnectionRequested();
 
-
         if (mConnectMark) {
             mConnectMark = false;
-            try {
-                InetAddress deviceAddress = InetAddress.getByName(DEVICE_ADDRESS);
-                mSocket = new DatagramSocket(null);
-                mSocket.setReuseAddress(true);
-                mSocket.bind(new InetSocketAddress(APP_PORT));
-                mReceiveThread = new ReceiveThread(mSocket);
-                mReceiveThread.setPacketQueue(mInQueue);
-                mReceiveThread.start();
-                mPostThread = new PostThread(mSocket, deviceAddress);
-                mPostThread.start();
-                notifyConnected();
-            } catch (IOException e) {
-                if (mSocket != null) {
-                    mSocket.close();
-                    mSocket = null;
-                }
-                notifyConnectionFailed("Create socket failed");
-            }
+            mReceiveThread = new ReceiveThread(mSocket, address, port);
+            mReceiveThread.setPacketQueue(mInQueue);
+            mReceiveThread.start();
+            mPostThread = new PostThread(mSocket, address, port);
+            mPostThread.start();
+            notifyConnected();
         }
     }
 
@@ -106,12 +93,12 @@ public class EspUdpDriver extends CrtpDriver {
     public void disconnect() {
         if (mSocket != null) {
             mSocket.close();
-            mSocket = null;
             mReceiveThread.interrupt();
             mReceiveThread.setPacketQueue(null);
             mReceiveThread = null;
             mPostThread.interrupt();
             mPostThread = null;
+            mSocket = null;
             notifyDisconnected();
         }
     }
@@ -143,11 +130,13 @@ public class EspUdpDriver extends CrtpDriver {
     private static class PostThread extends Thread {
         private BlockingQueue<CrtpPacket> mmQueue = new LinkedBlockingQueue<>();
         private DatagramSocket mmSocket;
-        private InetAddress mmDevAddress;
+        private final AtomicReference<InetAddress> address;
+        private final AtomicReference<Integer> port;
 
-        PostThread(DatagramSocket socket, InetAddress devAddress) {
-            mmSocket = socket;
-            mmDevAddress = devAddress;
+        PostThread(DatagramSocket socket, AtomicReference<InetAddress> address, AtomicReference<Integer> port) {
+            this.mmSocket = socket;
+            this.address = address;
+            this.port = port;
         }
 
         void sendPacket(CrtpPacket packet) {
@@ -167,12 +156,18 @@ public class EspUdpDriver extends CrtpDriver {
                         checksum += (b & 0xff);
                     }
                     buf[buf.length - 1] = (byte) checksum;
+
+                    if (address.get() == null || port.get() == null) {
+                        continue;
+                    }
+
                     log.info("run: PostData: " + Arrays.toString(buf));
-                    DatagramPacket udpPacket = new DatagramPacket(buf, buf.length, mmDevAddress, DEVICE_PORT);
+
+                    DatagramPacket udpPacket = new DatagramPacket(buf, buf.length, address.get(), port.get());
                     mmSocket.send(udpPacket);
                 } catch (IOException e) {
                     log.info("sendPacket: IOException: " + e.getMessage());
-                    mmSocket.close();
+//                    mmSocket.close();
                     break;
                 } catch (InterruptedException e) {
                     break;
@@ -185,10 +180,14 @@ public class EspUdpDriver extends CrtpDriver {
 
     private static class ReceiveThread extends Thread {
         private DatagramSocket mmSocket;
+        private final AtomicReference<InetAddress> address;
+        private final AtomicReference<Integer> port;
         private BlockingQueue<CrtpPacket> mmQueue;
 
-        ReceiveThread(DatagramSocket socket) {
-            mmSocket = socket;
+        ReceiveThread(DatagramSocket socket, AtomicReference<InetAddress> address, AtomicReference<Integer> port) {
+            this.mmSocket = socket;
+            this.address = address;
+            this.port = port;
         }
 
         void setPacketQueue(BlockingQueue<CrtpPacket> queue) {
@@ -203,14 +202,26 @@ public class EspUdpDriver extends CrtpDriver {
                 try {
                     mmSocket.receive(udpPacket);
                     log.info("run: ReceiveData");
+
                     byte[] raw = udpPacket.getData();
+
+                    if(new String(raw).contains("ping")){
+                        if (!Integer.valueOf(udpPacket.getPort()).equals(port.get())) {
+                            port.set(udpPacket.getPort());
+                        }
+                        if (!udpPacket.getAddress().equals(address.get())) {
+                            address.set(udpPacket.getAddress());
+                        }
+                        continue;
+                    }
+
                     byte[] data = new byte[udpPacket.getLength() - 1];
                     System.arraycopy(udpPacket.getData(), udpPacket.getOffset(), data, 0, data.length);
                     int checksum = 0;
                     for (byte b : data) {
                         checksum += (b & 0xff);
                     }
-                    if (raw[udpPacket.getLength() - 1] != (byte)checksum) {
+                    if (raw[udpPacket.getLength() - 1] != (byte) checksum) {
                         log.info("Receive Invalid packet");
                         continue;
                     }
@@ -220,7 +231,7 @@ public class EspUdpDriver extends CrtpDriver {
                     }
                 } catch (IOException e) {
                     log.info("receivePacket: IOException: " + e.getMessage());
-                    mmSocket.close();
+//                    mmSocket.close();
                     break;
                 }
             }

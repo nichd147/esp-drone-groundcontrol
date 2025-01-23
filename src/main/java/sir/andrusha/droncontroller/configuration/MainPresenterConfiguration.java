@@ -2,21 +2,18 @@ package sir.andrusha.droncontroller.configuration;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.event.ContextRefreshedEvent;
-import org.springframework.context.event.EventListener;
-import se.bitcraze.crazyfliecontrol2.MainPresenter;
+import sir.andrusha.droncontroller.service.DroneRegistry;
+import sir.andrusha.droncontroller.service.UdpPingPongThread;
 
-import java.io.File;
+import java.io.IOException;
 
 @Configuration
 public class MainPresenterConfiguration {
 
     @Bean
-    public MainPresenter mainPresenter() {
-        File mCacheDir = new File("TOC_cache");
-        mCacheDir.mkdirs();
-        MainPresenter pr = new MainPresenter();
-        pr.connect(mCacheDir);
-        return pr;
+    public UdpPingPongThread udpPingPongThread(DroneRegistry droneRegistry) throws IOException {
+        UdpPingPongThread udpPingPongThread = new UdpPingPongThread(droneRegistry);
+        udpPingPongThread.start();
+        return udpPingPongThread;
     }
 }

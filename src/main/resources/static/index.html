@@ -59,33 +59,14 @@
             Y :<input id="joy1Y" type="text"/>
         </div>
         <div class="col">
-            <table class="table table-hover">
+            <table id="namesTable" class="table table-hover">
                 <thead>
                 <tr>
                     <th scope="col">#</th>
-                    <th scope="col">First</th>
-                    <th scope="col">Last</th>
-                    <th scope="col">Handle</th>
+                    <th scope="col">Name</th>
                 </tr>
                 </thead>
                 <tbody>
-                <tr>
-                    <th scope="row">1</th>
-                    <td>Mark</td>
-                    <td>Otto</td>
-                    <td>@mdo</td>
-                </tr>
-                <tr>
-                    <th scope="row">2</th>
-                    <td>Jacob</td>
-                    <td>Thornton</td>
-                    <td>@fat</td>
-                </tr>
-                <tr>
-                    <th scope="row">3</th>
-                    <td colspan="2">Larry the Bird</td>
-                    <td>@twitter</td>
-                </tr>
                 </tbody>
             </table>
         </div>
@@ -111,7 +92,7 @@
 	var joy2X = document.getElementById("joy2X");
 	var joy2Y = document.getElementById("joy2Y");
 
-    const url = 'http://localhost:8080/api/position';
+    const url = window.location.origin + '/api/position';
 
     setInterval(function(){
         let leftJoyX=Joy1.GetX();
@@ -144,8 +125,51 @@
 <!--            let problem = confirm("check connection");-->
 <!--            alert( problem );-->
         });
-    }, 200);
+    }, 300);
 
+    const namesTableBody = document.querySelector('#namesTable tbody');
+    let previousNames = [];
+
+    async function fetchNames() {
+        try {
+            const response = await fetch(window.location.origin + '/api/drones');
+            const data = await response.json();
+            return data;
+            //return ["Алексей","Мария","Иван"];
+        } catch (error) {
+            console.error('Ошибка при получении списка имен:', error);
+            return [];
+        }
+    }
+
+    function updateNamesTable(items) {
+        items.forEach((item, index) => {
+            // Если имя уже было отображено, пропускаем его
+            if (previousNames.includes(item)) return;
+
+            // Создаем новую строку для таблицы
+            const row = document.createElement('tr');
+
+            // Колонка с номером
+            const numberCell = document.createElement('td');
+            numberCell.textContent = previousNames.length + 1; // Порядковый номер
+            row.appendChild(numberCell);
+
+            // Колонка с именем
+            const macCell = document.createElement('td');
+            macCell.textContent = item;
+            row.appendChild(macCell);
+
+            namesTableBody.appendChild(row);
+            previousNames.push(item);
+        });
+    }
+    async function updateTable() {
+        const names = await fetchNames();
+        updateNamesTable(names);
+    }
+    setInterval(updateTable, 1000);
+    updateTable();
 </script>
 </body>
 </html>

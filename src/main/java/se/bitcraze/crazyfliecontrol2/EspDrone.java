@@ -3,7 +3,6 @@ package se.bitcraze.crazyfliecontrol2;
 import lombok.extern.slf4j.Slf4j;
 import se.bitcraze.crazyflie.lib.crazyflie.ConnectionAdapter;
 import se.bitcraze.crazyflie.lib.crazyflie.Crazyflie;
-import se.bitcraze.crazyflie.lib.crazyradio.ConnectionData;
 import se.bitcraze.crazyflie.lib.crtp.CommanderPacket;
 import se.bitcraze.crazyflie.lib.crtp.CrtpDriver;
 import se.bitcraze.crazyflie.lib.crtp.CrtpPacket;
@@ -22,12 +21,20 @@ import se.bitcraze.crazyfliecontrol.controller.JoystickView;
 import se.bitcraze.crazyfliecontrol.controller.TouchController;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.DatagramSocket;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.util.Map;
 
 @Slf4j
-public class MainPresenter {
+public class EspDrone {
 
     private static final String LOG_TAG = "Crazyflie-MainPresenter";
+    private final String name;
+    private final File mCacheDir;
+    private DatagramSocket mSocket;
+    private int localPort;
 
     private Crazyflie mCrazyflie;
     private CrtpDriver mDriver;
@@ -51,10 +58,32 @@ public class MainPresenter {
 
     private Controls mControls;
     private IController mController;
-    private JoystickView mJoystickViewLeft =  new JoystickView();
-    private JoystickView mJoystickViewRight =  new JoystickView();
+    private JoystickView mJoystickViewLeft = new JoystickView();
+    private JoystickView mJoystickViewRight = new JoystickView();
 
-    public MainPresenter() {
+    public EspDrone(String name) {
+        this.name = name;
+        this.mCacheDir = new File("TOC_cache_" + name.replaceAll(":", "_"));
+        this.mCacheDir.mkdirs();
+
+        while (true) {
+            try {
+                mSocket = new DatagramSocket(null);
+                mSocket.setReuseAddress(true);
+
+                ServerSocket s = new ServerSocket(0);
+                localPort = s.getLocalPort();
+                s.close();
+                mSocket.bind(new InetSocketAddress(localPort));
+
+                break;
+            } catch (IOException e) {
+                if (mSocket != null) {
+                    mSocket.close();
+                }
+//            notifyConnectionFailed("Create socket failed");
+            }
+        }
     }
 
     private ConnectionAdapter crazyflieConnectionAdapter = new ConnectionAdapter() {
@@ -235,15 +264,15 @@ public class MainPresenter {
         return mController;
     }
 
-    public void connect(File cacheDir) {
+    public void connect() {
         log.debug("connectUDP()");
         disconnect();
         mDriver = null;
-        mDriver = new EspUdpDriver();
-        connect(cacheDir, null);
+        mDriver = new EspUdpDriver(mSocket);
+        connect(mCacheDir);
     }
 
-    private void connect(File mCacheDir, ConnectionData connectionData) {
+    private void connect(File mCacheDir) {
         if (mDriver != null) {
             // add listener for connection status
             mDriver.addConnectionListener(crazyflieConnectionAdapter);
@@ -283,6 +312,10 @@ public class MainPresenter {
 
         // link quality is not available when there is no active connection
         log.info("setLinkQualityText(\"N/A\") NOT IMPLEMENTED");
+    }
+
+    public boolean isDisconnected() {
+        return mCrazyflie == null;
     }
 
     //TODO: make runAltAction more universal
@@ -370,5 +403,9 @@ public class MainPresenter {
         mLogg.stop(logConfig);
         mLogg.delete(logConfig);
         mLogg.removeLogListener(standardLogAdapter);
+    }
+
+    public Integer getPort() {
+        return localPort;
     }
 }
